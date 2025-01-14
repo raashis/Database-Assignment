@@ -1,0 +1,1044 @@
+// Aditi
+// Q1
+
+// Data cleaning necessary
+// All categories follow a unique pattern - only contain uppercase characters 
+// Filter for strings matching the above pattern to extract all categories: 
+db.customer_support.distinct("category", {
+  category: {
+    $regex: /^[A-Z ]+$/ // Use a regular expression to match specific patterns
+    /*
+      Explanation of the regex:
+      ^       - Asserts the start of the string
+      [A-Z ]  - Matches any uppercase letter (A to Z) or a space
+      +       - Ensures that one or more of these characters are present
+      $       - Asserts the end of the string
+
+      This pattern matches strings composed entirely of uppercase letters
+      and spaces, rejecting any strings with lowercase letters, numbers, or special characters.
+    */
+  }
+});
+
+// Angelina
+// Q2
+db.customer_support.aggregate([
+    {$match: {$expr: { $eq: ["$category", { $toUpper: "$category" }] } }}, // Find all categories which are in the correct format (ie in full caps).
+                                                                           // These categories represent all possible categories.
+    {$match: { $and: [ {flags : {$regex: /Q/}}, 
+                        {flags: {$regex: /W/}}] } }, // Condition: records containing colloquial variation and offensive language
+    {$group: { _id: { $toUpper: "$category" }, totalRecords:{$sum: 1}}}, // Get distinct categories and count for each category
+    
+    {$project: {category : "$_id", totalRecords:1, _id:0}} // rename "_id" as "category" to improve readability, display count
+])
+
+// esmond
+// qn 3
+db.flight_delay.aggregate([
+  { $match: { $or: [{ ArrDelay: { $gt: 0 } }, { DepDelay: { $gt: 0 } }] } },
+  { $addFields: { Type: "Delay" } },
+  { $merge: { into: "temp_flight_delay" } }  
+])
+db.flight_delay.aggregate([
+  { $match: { Cancelled: 1 } },
+  { $addFields: { Type: "Cancelled" } },
+  { $merge: { into: "temp_flight_delay", whenMatched: "merge" } }  
+])
+db.temp_flight_delay.aggregate([
+  {
+    $group: {
+      _id: {
+        Type: "$Type",
+        DayOfWeek: "$DayOfWeek",
+        Date: "$Date",
+        DepTime: "$DepTime",
+        ArrTime: "$ArrTime",
+        CRSArrTime: "$CRSArrTime",
+        UniqueCarrier: "$UniqueCarrier",
+        Airline: "$Airline",
+        FlightNum: "$FlightNum",
+        TailNum: "$TailNum",
+        ActualElapsedTime: "$ActualElapsedTime",
+        CRSElapsedTime: "$CRSElapsedTime",
+        ArrDelay: "$ArrDelay",
+        DepDelay: "$DepDelay",
+        Org_Airport: "$Org_Airport",
+        Dest_Airport: "$Dest_Airport",
+        Distance: "$Distance",
+        TaxiIn: "$TaxiIn",
+        TaxiOut: "$TaxiOut"
+      }
+    }
+  },
+  { 
+    $replaceRoot: { newRoot: "$_id" }  
+  }
+]);
+
+db.temp_flight_delay.drop();
+
+// facet DONT work here as there is size limitation
+db.flight_delay.aggregate([
+  {
+    $facet: {
+      delay: [
+        { $match: { $or: [{ ArrDelay: { $gt: 0 } }, { DepDelay: { $gt: 0 } }] } },
+        { $addFields: { Type: "Delay" } },
+        { $project: { Type: 1 } },
+        { $limit: 1000 }
+      ],
+      cancel: [
+        { $match: { Cancelled: 1 } },
+        { $addFields: { Type: "Cancelled" } },
+        { $project: { Type: 1 } },
+        { $limit: 1000 }
+      ]
+    }
+  },
+  {
+    $project: { results: { $concatArrays: ["$delay", "$cancel"] } }
+  },
+  {
+    $unwind: "$results"
+  },
+  {
+    $replaceRoot: { newRoot: "$results" }
+  },
+]);
+
+// Raashi
+// QN 4 
+db.flight_delay.aggregate([
+  {
+    $project: {
+      Year: { $year: { $dateFromString: { dateString: "$Date" } } }, //extract the yr
+      Month: { $month: { $dateFromString: { dateString: "$Date" } } }, //extract the month
+      Route: { $concat: ["$Origin", " to ", "$Dest"] }, // now we have a route field, for easy grouping
+      DepDelay: 1 // to filter delayed flights
+    }
+  },
+  
+  {
+    $match: {
+      DepDelay: { $gt: 0 }  
+    }
+  },
+  
+  {
+    $group: {
+      _id: { Year: "$Year", Month: "$Month", Route: "$Route" }, // grouping by year, month and route
+      DelayCount: { $sum: 1 }  //sum of delays
+    }
+  },
+  
+  {
+    $sort: { "_id.Year": 1, "_id.Month": 1, "DelayCount": -1 } //sorting by year, month, delay count
+  },
+  
+  {
+    $group: {
+      _id: { Year: "$_id.Year", Month: "$_id.Month" }, //grouping by year and month
+      Route: { $first: "$_id.Route" }, //now we can get the route w the most delays
+      DelayCount: { $first: "$DelayCount" } //the delayed count for that route
+    }
+  },
+ 
+  {
+    $project: {
+      Month: { $arrayElemAt: [
+        ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        { $subtract: ["$_id.Month", 1] }
+      ] },
+      Route: 1,
+      DelayCount: 1 //here we can combine month and route
+    }
+  },
+  
+  //and finally sort the results by month
+  
+  {
+    $sort: { "_id.Month": 1 }
+  }
+]);
+
+// Chloe 
+// Qn 5
+// This was based on our previous assumption that quarter-on-quarter refers to the changes in the quarters of the same year. (ie Q1 to Q2 represents one quarter-on-quarter change)
+db.sia_stock.aggregate
+([
+    {
+        $match: 
+        {
+            StockDate:{$regex:"2023"}
+        }
+    },
+    {
+        $addFields: 
+        {
+            ParsedDate:{$dateFromString:{dateString:"$StockDate",format:"%m/%d/%Y"}}
+        }
+    },
+    {
+        $addFields: 
+        {
+            Year:{$year:"$ParsedDate"},
+            Quarter: 
+            {
+                $ceil: { $divide: [{ $month: "$ParsedDate" }, 3] }
+            }
+        }
+    },
+    {
+        $group: {
+            _id: { Year: "$Year", Quarter: "$Quarter" },
+            Max_High: { $max: "$High" },
+            Min_Low: { $min: "$Low" },
+            Avg_Price: { $avg: "$Price" }
+        }
+    },
+    {
+        $sort: {
+            "_id.Year": 1,
+            "_id.Quarter": 1
+        }
+    },
+    {
+        $setWindowFields: {
+            partitionBy: "$_id.Year",
+            sortBy: { "_id.Quarter": 1 },
+            output: {
+                Prev_Quarter: {
+                    $shift: { by: -1, output: "$$CURRENT" }
+                }
+            }
+        }
+    },
+    {
+        $addFields: {
+            Change_Percent_High: {
+                $cond: [
+                    { $ne: ["$Prev_Quarter.Max_High", 0] },
+                    {
+                        $multiply: [
+                            { $divide: [{ $subtract: ["$Max_High", "$Prev_Quarter.Max_High"] }, "$Prev_Quarter.Max_High"] },
+                            100
+                        ]
+                    },
+                    null
+                ]
+            },
+            Change_Percent_Low: 
+            {
+                $cond: 
+                [
+                    { $ne: ["$Prev_Quarter.Min_Low", 0] },
+                    {
+                        $multiply: 
+                        [
+                            { $divide: [{ $subtract: ["$Min_Low", "$Prev_Quarter.Min_Low"] }, "$Prev_Quarter.Min_Low"] },
+                            100
+                        ]
+                    },
+                    null
+                ]
+            },
+            Change_Percent_Avg: {
+                $cond: [
+                    { $ne: ["$Prev_Quarter.Avg_Price", 0] },
+                    {
+                        $multiply: [
+                            { $divide: [{ $subtract: ["$Avg_Price", "$Prev_Quarter.Avg_Price"] }, "$Prev_Quarter.Avg_Price"] },
+                            100
+                        ]
+                    },
+                    null
+                ]
+            }
+        }
+    },
+    {
+        $project: {
+            Year: "$_id.Year",
+            Quarter: "$_id.Quarter",
+            Max_High:1,
+            Min_Low:1,
+            Avg_Price:1,
+            Change_Percent_High: 1,
+            Change_Percent_Low: 1,
+            Change_Percent_Avg: 1
+        }
+    }
+]);
+
+// Chloe
+// Q6 nosql
+db.customer_booking.aggregate
+([
+    {
+        $group: 
+        {
+            _id: 
+            {
+                sales_channel:"$sales_channel",
+                route:"$route"
+            },
+            num_flights:{$count:{}},
+            avg_length_of_stay:{$avg:"$length_of_stay"},
+            avg_flight_duration:{$avg:"$flight_duration"},
+            avg_wants_extra_baggage:{$avg:"$wants_extra_baggage"},
+            avg_wants_preferred_seat:{$avg:"$wants_preferred_seat"},
+            avg_wants_in_flight_meals:{$avg:"$wants_in_flight_meals"}
+        }
+    },
+    {
+        $addFields:
+        {
+            avg_los_per_flight_hour:
+            {
+                $cond: 
+                [
+                    { $ne: ["$avg_flight_duration", 0] },
+                    { $divide: ["$avg_length_of_stay", "$avg_flight_duration"] },
+                    null
+                ]
+            },
+            avg_baggage_per_flight_hour: 
+            {
+                $cond: 
+                [
+                    { $ne: ["$avg_flight_duration", 0] },
+                    { $divide: ["$avg_wants_extra_baggage", "$avg_flight_duration"] },
+                    null
+                ]
+            },
+            avg_seat_per_flight_hour: 
+            {
+                $cond: 
+                [
+                    { $ne: ["$avg_flight_duration", 0] },
+                    { $divide: ["$avg_wants_preferred_seat", "$avg_flight_duration"] },
+                    null
+                ]
+            },
+            avg_meals_per_flight_hour: 
+            {
+                $cond: 
+                [
+                    { $ne: ["$avg_flight_duration", 0] },
+                    { $divide: ["$avg_wants_in_flight_meals", "$avg_flight_duration"] },
+                    null
+                ]
+            }
+        }
+    },
+    {
+        $sort: 
+        {
+            "_id.sales_channel": 1,
+            num_flights: -1
+        }
+    },
+    {
+        $project: 
+        {
+            sales_channel: "$_id.sales_channel",
+            route: "$_id.route",
+            num_flights: 1,
+            avg_los_per_flight_hour: 1,
+            avg_baggage_per_flight_hour: 1,
+            avg_seat_per_flight_hour: 1,
+            avg_meals_per_flight_hour: 1
+        }
+    }
+]);
+
+// Raashi
+// QN 7 
+db.airlines_reviews.aggregate([
+  //addin season field
+  {
+    $addFields: {
+      Season: {
+        $cond: {
+          if: { $in: [{ $substr: ["$MonthFlown", 0, 3] }, ["Jun", "Jul", "Aug", "Sep"]] },
+          then: "Seasonal",
+          else: "Non-Seasonal"
+        }
+      }
+    }
+  },
+
+// now here we can grp by season, airline and class
+//then we can calculate averages 
+  {
+    $group: {
+      _id: { 
+        Season: "$Season",  
+        Airline: "$Airline", 
+        Class: "$Class"     
+      },
+      AvgSeatComfort: { $avg: "$SeatComfort" },
+      AvgFoodnBeverages: { $avg: "$FoodnBeverages" },
+      AvgInflightEntertainment: { $avg: "$InflightEntertainment" },
+      AvgValueForMoney: { $avg: "$ValueForMoney" },
+      AvgOverallRating: { $avg: "$OverallRating" }
+    }
+  },
+
+  // ensure seasonal comes first
+  {
+    $addFields: {
+      SeasonSortOrder: {
+        $cond: {
+          if: { $eq: ["$_id.Season", "Seasonal"] },
+          then: 1, // seasonal comes first, then non seasonal
+          else: 2  
+        }
+      }
+    }
+  },
+
+//then we sort by SeasonSortOrder, then by airline within each season
+  {
+    $sort: {
+      SeasonSortOrder: 1,  //seasonal first
+      "_id.Airline": 1,     // within each season, sort by airline
+      "_id.Class": 1       // within each airline, sort by class
+    }
+  },
+
+  // finally we can project the final output
+  {
+    $project: {
+      Season: "$_id.Season", 
+      Airline: "$_id.Airline", 
+      Class: "$_id.Class",
+      AvgSeatComfort: 1,
+      AvgFoodnBeverages: 1,
+      AvgInflightEntertainment: 1,
+      AvgValueForMoney: 1,
+      AvgOverallRating: 1
+    }
+  }
+]);
+
+// Angelina
+// qn 8
+db.airlines_reviews.aggregate([
+  // $facet creates multiple sub-pipelines for different types of complaints
+  {$facet: { 
+      seat_complaints: [ // seat complaints sub-pipeline
+                        {$match: // filter reviews with the following conditions
+                            {$and: [ { SeatComfort: { $lt: 3 } }, { Reviews: { $regex: /comfort|seat/i } } ] } // condition: rating < 3 AND 
+                                                                                                               // case-insensitive regex to find associated keywords in Reviews
+                        },
+                        {$project: { // project the following in the output
+                            Airline: 1,
+                            TypeofTraveller: 1,
+                            Issue: { $literal: "Seat Complaints" }
+                        }}
+      ],
+      service_complaints: [ // service complaints sub-pipeline
+                        {$match: 
+                            {$and: [ { StaffService: { $lt: 3 }}, { Reviews: { $regex: /service|staff/i }} ] }
+                        },
+                        {$project: {
+                            Airline: 1,
+                            TypeofTraveller: 1,
+                            Issue: { $literal: "Service Complaints" }
+                        }}
+      ],
+      food_complaints: [ // food complaints sub-pipeline
+                        {$match: 
+                            {$and: [ { FoodnBeverages: { $lt: 3 }}, { Reviews: { $regex: /food|drink/i }} ] }
+                        },
+                        {$project: {
+                            Airline: 1,
+                            TypeofTraveller: 1,
+                            Issue: { $literal: "Food Complaints" }
+                        }}
+      ],
+      entertainment_complaints: [ // entertainment complaints sub-pipeline
+                        {$match: {
+                            $and: [ { InflightEntertainment: { $lt: 3 }}, { Reviews: { $regex: /entertainment/i }} ] }
+                        },
+                        {$project: {
+                            Airline: 1,
+                            TypeofTraveller: 1,
+                            Issue: { $literal: "Entertainment Complaints" }
+                         }}
+      ],
+      value_complaints: [ // value complaints sub-pipeline
+                        {$match: { ValueForMoney: { $lt: 3 } } }, // didn't need to use case-insensitive regex to find asssociated keywords in Reviews because normally, 
+                                                                  // if one or more aspect is not up to expectations (eg food ratings < 3), then it is reasonable to assume that it is not be value for money
+                                                                  // despite not having any keywords related to "value" or "money" etc.
+                        {$project: {
+                            Airline: 1,
+                            TypeofTraveller: 1,
+                            Issue: { $literal: "Value Complaints" }
+                        }}
+      ],
+      delayed_complaints: [ // delayed or cancelled flights complaints sub-pipeline
+                        {$match: { Reviews: { $regex: /delay|cancelled|postponed|late/i } } }, // even though this field is not being rated, it is one of the most common complaints in airlines.
+                        {$project: {
+                            Airline: 1,
+                            TypeofTraveller: 1,
+                            Issue: { $literal: "Delayed or Cancelled Flights Complaints" }
+                        }}
+      ]
+    }
+  },
+  // (2) project to combine the results of all sub-pipelines into a single array
+  { $project: {
+      combined: { $concatArrays: [
+        "$seat_complaints", 
+        "$service_complaints", 
+        "$food_complaints", 
+        "$entertainment_complaints", 
+        "$value_complaints", 
+        "$delayed_complaints"
+      ] }
+  }},
+  // (3) make each entry a separate document
+  { $unwind: "$combined" },
+  // (4) replace the current document with the combined array item
+  { $replaceRoot: { newRoot: "$combined" } },
+  // (5) group by Airline, Type of Traveller, and Issue
+  { $group: {
+      _id: { Airline: "$Airline", TypeofTraveller: "$TypeofTraveller", Issue: "$Issue" },
+      Frequency: { $sum: 1 } // Count the frequency of each complaint type for each Airline and Traveller type
+  }},
+  // (6) sort airline and type of traveller in ascending order, and frequency in descending order
+  // By arranging from frequency from highest to lowest frequency, we can see highlight top complaints.
+  { $sort: { "_id.Airline": 1, "_id.TypeofTraveller": 1, "Frequency": -1 }},
+  // (7) project the following in the final output
+  { $project: {
+      _id: 0, // exclude id to improve readability
+      Airline: "$_id.Airline",
+      TypeofTraveller: "$_id.TypeofTraveller",
+      Issue: "$_id.Issue",
+      Frequency: 1
+  }}
+]);
+
+// Aditi
+// Qn 9 
+
+// Pipeline 1 - Overall Analysis ---------------------------------------------------
+
+db.airlines_reviews.aggregate([
+  // Step 1: Filter to only analyze verified reviews for Singapore Airlines
+  {
+    $match: {
+      Verified: "TRUE", // Include only reviews that are marked as verified
+      Airline: "Singapore Airlines" // Focus on reviews for Singapore Airlines
+    }
+  },
+  // Step 2: Standardize the `MonthFlown` format to ensure consistency
+  {
+    $addFields: {
+      corrected_monthflown: {
+        $cond: {
+          // Check if `MonthFlown` contains a two-digit year (length of 7 or less)
+          if: { $lte: [{ $strLenCP: "$MonthFlown" }, 7] },
+          then: { 
+            // Convert two-digit year to four-digit format (e.g., "Dec-23" -> "Dec-2023")
+            $concat: [
+              { $substrCP: ["$MonthFlown", 0, 3] }, // Extract the first 3 characters (month abbreviation, e.g., "Dec")
+              "-20", // Prefix "20" to make the year four digits
+              { $substrCP: ["$MonthFlown", 4, 2] } // Extract the year portion (e.g., "23")
+            ]
+          },
+          else: "$MonthFlown" // Keep the original value if already in the correct format
+        }
+      }
+    }
+  },
+  // Step 3: Add a new field `covid_period` to classify flight reviews by time period
+  {
+    $addFields: {
+      covid_period: {
+        $cond: {
+          // Check if the flight date is before January 1, 2020 (Pre-COVID)
+          if: {
+            $lt: [
+              { 
+                $dateFromString: { 
+                  dateString: { $concat: ["$corrected_monthflown", "-01"] }, // Form a complete date string (e.g., "Dec-2023-01")
+                  format: "%b-%Y-%d" // Specify the date format: month abbreviation, year, and day
+                }
+              },
+              new Date("2020-01-01") // Compare with the start of 2020
+            ]
+          },
+          then: "Pre-COVID", // Assign "Pre-COVID" label for flights before 2020
+          else: {
+            // Check if the flight date is on or after January 1, 2023 (Post-COVID)
+            $cond: {
+              if: {
+                $gte: [
+                  { 
+                    $dateFromString: { 
+                      dateString: { $concat: ["$corrected_monthflown", "-01"] },
+                      format: "%b-%Y-%d"
+                    }
+                  },
+                  new Date("2023-01-01") // Compare with the start of 2023
+                ]
+              },
+              then: "Post-COVID", // Assign "Post-COVID" label for flights from 2023 onwards
+              else: "During" // Assign "During" label for flights between 2020 and 2023
+            }
+          }
+        }
+      }
+    }
+  },
+  // Step 4: Filter out reviews from the "During" period
+  {
+    $match: {
+      covid_period: { $in: ["Pre-COVID", "Post-COVID"] } // Include only "Pre-COVID" and "Post-COVID" reviews
+    }
+  },
+  // Step 5: Group by `covid_period` and calculate key metrics
+  {
+    $group: {
+      _id: "$covid_period", // Group data by the `covid_period` field
+      proportion_recommended: {
+        // Calculate the proportion of reviews where "Recommended" is "yes"
+        $avg: { $cond: [{ $eq: ["$Recommended", "yes"] }, 1, 0] }
+      },
+      avg_overall_rating: { $avg: "$OverallRating" }, // Calculate average overall rating
+      avg_value_for_money: { $avg: "$ValueForMoney" }, // Calculate average value-for-money rating
+      avg_seat_comfort: { $avg: "$SeatComfort" }, // Calculate average seat comfort rating
+      avg_staff_service: { $avg: "$StaffService" }, // Calculate average staff service rating
+      avg_food_n_beverages: { $avg: "$FoodnBeverages" }, // Calculate average food and beverages rating
+      avg_inflight_entertainment: { $avg: "$InflightEntertainment" } // Calculate average inflight entertainment rating
+    }
+  },
+  // Step 6: Sort results by `covid_period` in ascending order
+  {
+    $sort: { _id: 1 } // Sort by `covid_period` ("Pre-COVID" first, then "Post-COVID")
+  },
+  // Step 7: Project results into a more readable format
+  {
+    $project: {
+      covid_period: "$_id", // Rename `_id` field to `covid_period` in the output
+      proportion_recommended: 1, // Include proportion of recommendations
+      avg_overall_rating: 1, // Include average overall rating
+      avg_value_for_money: 1, // Include average value-for-money rating
+      avg_seat_comfort: 1, // Include average seat comfort rating
+      avg_staff_service: 1, // Include average staff service rating
+      avg_food_n_beverages: 1, // Include average food and beverages rating
+      avg_inflight_entertainment: 1, // Include average inflight entertainment rating
+      _id: 0 // Exclude the default `_id` field from the final output
+    }
+  }
+]);
+
+
+
+// Pipeline 2  - Class-specific analysis 
+
+db.airlines_reviews.aggregate([
+  // Step 1: Filter only verified reviews for Singapore Airlines
+  {
+    $match: {
+      Verified: "TRUE", // Only include reviews marked as verified
+      Airline: "Singapore Airlines" // Narrow down to Singapore Airlines reviews
+    }
+  },
+
+  // Step 2: Standardize the month-year format in 'MonthFlown'
+  {
+    $addFields: {
+      corrected_monthflown: {
+        $cond: {
+          // Check if the 'MonthFlown' field uses a two-digit year format
+          if: { $lte: [{ $strLenCP: "$MonthFlown" }, 7] }, // Length <= 7 indicates a two-digit year
+          then: { 
+            // Transform two-digit year (e.g., "Dec-23") into four-digit year (e.g., "Dec-2023")
+            $concat: [
+              { $substrCP: ["$MonthFlown", 0, 3] }, // Extract the first three characters (month, e.g., "Dec")
+              "-20",  // Prefix "20" to the year to make it four digits
+              { $substrCP: ["$MonthFlown", 4, 2] } // Extract the two-digit year (e.g., "23")
+            ]
+          },
+          else: "$MonthFlown" // If already in four-digit format, retain the original value
+        }
+      }
+    }
+  },
+
+  // Step 3: Add a 'covid_period' field based on the flight date
+  {
+    $addFields: {
+      covid_period: {
+        $cond: {
+          if: {
+            $lt: [
+              // Convert the corrected 'MonthFlown' into a full date and compare
+              { 
+                $dateFromString: { 
+                  dateString: { $concat: ["$corrected_monthflown", "-01"] }, // Append '-01' to form a complete date
+                  format: "%b-%Y-%d" // Specify format: Month abbreviation, Year, and Day
+                }
+              },
+              new Date("2020-01-01") // Compare with January 1, 2020
+            ]
+          },
+          then: "Pre-COVID", // Assign "Pre-COVID" for dates before 2020
+          else: {
+            $cond: {
+              if: {
+                $gte: [
+                  // Check if the flight date is after January 1, 2023
+                  { 
+                    $dateFromString: { 
+                      dateString: { $concat: ["$corrected_monthflown", "-01"] }, // Convert to date again
+                      format: "%b-%Y-%d"
+                    }
+                  },
+                  new Date("2023-01-01") // Compare with January 1, 2023
+                ]
+              },
+              then: "Post-COVID", // Assign "Post-COVID" for dates in 2023 or later
+              else: "During" // Assign "During" for dates between 2020 and 2023
+            }
+          }
+        }
+      }
+    }
+  },
+
+  // Step 4: Filter for only "Pre-COVID" and "Post-COVID" reviews
+  {
+    $match: {
+      covid_period: { $in: ["Pre-COVID", "Post-COVID"] } // Exclude reviews from the "During" period
+    }
+  },
+
+  // Step 5: Group by Class and covid_period, then calculate average metrics
+  {
+    $group: {
+      _id: { 
+        Class: "$Class", // Group by class (e.g., Economy, Business)
+        covid_period: "$covid_period" // Further group by COVID period (Pre/Post-COVID)
+      },
+      // Calculate the proportion of reviews that recommend the airline
+      proportion_recommended: {
+        $avg: { 
+          $cond: [{ $eq: ["$Recommended", "yes"] }, 1, 0] // Treat "yes" as 1, "no" as 0, and average them
+        }
+      },
+      avg_overall_rating: { $avg: "$OverallRating" }, // Average of overall ratings
+      avg_value_for_money: { $avg: "$ValueForMoney" }, // Average of value-for-money ratings
+      avg_seat_comfort: { $avg: "$SeatComfort" }, // Average of seat comfort ratings
+      avg_staff_service: { $avg: "$StaffService" }, // Average of staff service ratings
+      avg_food_n_beverages: { $avg: "$FoodnBeverages" }, // Average of food and beverage ratings
+      avg_inflight_entertainment: { $avg: "$InflightEntertainment" } // Average of inflight entertainment ratings
+    }
+  },
+
+  // Step 6: Sort results by Class and covid_period
+  {
+    $sort: { 
+      "_id.Class": 1, // Sort alphabetically by Class (e.g., Economy, Business, First)
+      "_id.covid_period": 1 // Within each class, sort chronologically by COVID period (Pre-COVID first)
+    }
+  },
+
+  // Step 7: Format the output for better readability
+  {
+    $project: {
+      Class: "$_id.Class", // Include the class in the output
+      covid_period: "$_id.covid_period", // Include the COVID period in the output
+      proportion_recommended: 1, // Include the proportion of recommendations
+      avg_overall_rating: 1, // Include average overall rating
+      avg_value_for_money: 1, // Include average value-for-money rating
+      avg_seat_comfort: 1, // Include average seat comfort rating
+      avg_staff_service: 1, // Include average staff service rating
+      avg_food_n_beverages: 1, // Include average food and beverage rating
+      avg_inflight_entertainment: 1, // Include average inflight entertainment rating
+      _id: 0 // Exclude the default `_id` field from the output
+    }
+  }
+]);
+
+
+
+
+// Pipeline 3 - Analyse by TypeofTraveller 
+
+db.airlines_reviews.aggregate([
+  // Step 1: Filter verified reviews for Business and Economy class, and for Singapore Airlines
+  {
+    $match: {
+      Verified: "TRUE", // Include only verified reviews
+      Class: { $in: ["Business Class", "Economy Class"] }, // Include reviews only for specified classes
+      Airline: "Singapore Airlines" // Focus only on reviews for Singapore Airlines
+    }
+  },
+
+  // Step 2: Standardize the month-year format in the 'MonthFlown' field
+  {
+    $addFields: {
+      corrected_monthflown: {
+        $cond: {
+          // Check if 'MonthFlown' contains a two-digit year (e.g., "Dec-23")
+          if: { $lte: [{ $strLenCP: "$MonthFlown" }, 7] }, 
+          then: { 
+            // Convert two-digit year to four-digit (e.g., "Dec-23" to "Dec-2023")
+            $concat: [
+              { $substrCP: ["$MonthFlown", 0, 3] }, // Extract the three-letter month abbreviation (e.g., "Dec")
+              "-20", // Add "20" to form a four-digit year
+              { $substrCP: ["$MonthFlown", 4, 2] } // Extract the last two characters for the year part
+            ]
+          },
+          else: "$MonthFlown" // If already in four-digit format (e.g., "Dec-2023"), keep as-is
+        }
+      }
+    }
+  },
+
+  // Step 3: Add a 'covid_period' field to categorize reviews into Pre-COVID, During, or Post-COVID
+  {
+    $addFields: {
+      covid_period: {
+        $cond: {
+          // If flight date is before January 1, 2020, classify as "Pre-COVID"
+          if: {
+            $lt: [
+              { 
+                $dateFromString: { 
+                  dateString: { $concat: ["$corrected_monthflown", "-01"] }, // Append '-01' for a valid date string
+                  format: "%b-%Y-%d" // Specify format: month abbreviation, year, and day
+                }
+              },
+              new Date("2020-01-01") // Cutoff date for "Pre-COVID"
+            ]
+          },
+          then: "Pre-COVID",
+          else: {
+            // If flight date is on or after January 1, 2023, classify as "Post-COVID"
+            $cond: {
+              if: {
+                $gte: [
+                  { 
+                    $dateFromString: { 
+                      dateString: { $concat: ["$corrected_monthflown", "-01"] }, 
+                      format: "%b-%Y-%d" 
+                    }
+                  },
+                  new Date("2023-01-01") // Cutoff date for "Post-COVID"
+                ]
+              },
+              then: "Post-COVID",
+              else: "During" // All dates between 2020 and 2023 fall into the "During" period
+            }
+          }
+        }
+      }
+    }
+  },
+
+  // Step 4: Filter out reviews during the "During" COVID period
+  {
+    $match: {
+      covid_period: { $in: ["Pre-COVID", "Post-COVID"] } // Include only Pre-COVID and Post-COVID reviews
+    }
+  },
+
+  // Step 5: Group reviews by Type of Traveller and covid_period, and calculate key metrics
+  {
+    $group: {
+      _id: { 
+        TypeofTraveller: "$TypeofTraveller", // Group by traveller type (e.g., "Solo Traveller")
+        covid_period: "$covid_period" // Also group by COVID period (Pre/Post-COVID)
+      },
+      proportion_recommended: {
+        $avg: { $cond: [{ $eq: ["$Recommended", "yes"] }, 1, 0] } // Calculate the proportion of "yes" recommendations
+      },
+      avg_overall_rating: { $avg: "$OverallRating" }, // Average of overall ratings
+      avg_value_for_money: { $avg: "$ValueForMoney" }, // Average of value-for-money ratings
+      avg_seat_comfort: { $avg: "$SeatComfort" }, // Average of seat comfort ratings
+      avg_staff_service: { $avg: "$StaffService" }, // Average of staff service ratings
+      avg_food_n_beverages: { $avg: "$FoodnBeverages" }, // Average of food and beverage ratings
+      avg_inflight_entertainment: { $avg: "$InflightEntertainment" } // Average of in-flight entertainment ratings
+    }
+  },
+
+  // Step 6: Sort the grouped results by Type of Traveller and covid_period
+  {
+    $sort: { 
+      "_id.TypeofTraveller": 1, // Sort by traveller type alphabetically
+      "_id.covid_period": 1 // Then sort by COVID period in ascending order
+    }
+  },
+
+  // Step 7: Format the output for readability
+  {
+    $project: {
+      TypeofTraveller: "$_id.TypeofTraveller", // Output traveller type
+      covid_period: "$_id.covid_period", // Output COVID period
+      proportion_recommended: 1, // Include proportion of recommendations
+      avg_overall_rating: 1, // Include average overall rating
+      avg_value_for_money: 1, // Include average value-for-money rating
+      avg_seat_comfort: 1, // Include average seat comfort rating
+      avg_staff_service: 1, // Include average staff service rating
+      avg_food_n_beverages: 1, // Include average food and beverage rating
+      avg_inflight_entertainment: 1, // Include average in-flight entertainment rating
+      _id: 0 // Exclude the default '_id' field from the output
+    }
+  }
+]);
+
+// esmond
+// qn 10
+
+//// categorise the reviews by identifying certain keywords, so to filter out the specific columns we will be analysing 
+db.airlines_reviews.aggregate([
+  {
+    $project: {
+      Issue: {
+        $switch: {
+          branches: [
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /compensation|compensate|refund/i } }] }, then: "Compensation Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /safe|safety|emergency/i } }] }, then: "Safety Related" },
+            { case: { $regexMatch: { input: "$Reviews", regex: /turbulence/i } }, then: "Turbulence Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /seat|toilet|comfort/i } }] }, then: "Facility Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /service|serve|staff|crew/i } }] }, then: "Service Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /delay|late|wait/i } }] }, then: "Delay Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /baggage|luggage/i } }] }, then: "Baggage Related" }
+          ],
+          default: "Other"
+        }
+      }
+    }
+  },
+  { $group: { _id: "$Issue", Frequency: { $sum: 1 } } },
+  { $sort: { Frequency: -1 } }
+]);
+
+//// scan through the reviews under 'other', notice that it is mainly good reviews / short reviews that do not consist the keywords i used to filter
+db.airlines_reviews.aggregate([
+  {
+    $project: {
+      Reviews: 1,
+      Issue: {
+        $switch: {
+          branches: [
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /compensation|compensate|refund/i } }] }, then: "Compensation Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /safe|safety|emergency/i } }] }, then: "Safety Related" },
+            { case: { $regexMatch: { input: "$Reviews", regex: /turbulence/i } }, then: "Turbulence Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /seat|toilet|comfort/i } }] }, then: "Facility Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /service|serve|staff|crew/i } }] }, then: "Service Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /delay|late|wait/i } }] }, then: "Delay Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /baggage|luggage/i } }] }, then: "Baggage Related" }
+          ],
+          default: "Other"
+        }
+      }
+    }
+  },
+  { $match: { Issue: "Other" } }
+]);
+
+//// analyse the reviews in 'Compensation', 'Safety', 'Turbulence' which aligns with the SQ321 incident (v1.0 - single category)
+db.airlines_reviews.aggregate([
+  {
+    $project: {
+      Reviews: 1,
+      Issue: {
+        $switch: {
+          branches: [
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /compensation|compensate|refund/i } }] }, then: "Compensation Related" },
+            { case: { $or: [{ $regexMatch: { input: "$Reviews", regex: /safe|safety|emergency/i } }] }, then: "Safety Related" },
+            { case: { $regexMatch: { input: "$Reviews", regex: /turbulence/i } }, then: "Turbulence Related" }
+          ],
+          default: "Other"
+        }
+      }
+    }
+  },
+  { $match: { Issue: { $in: ["Compensation Related", "Safety Related", "Turbulence Related"] } } },
+  { $sort: { Issue: 1 } }
+]);
+
+
+//// analyse the reviews in 'Compensation', 'Safety', 'Turbulence' which aligns with the SQ321 incident (v2.0 - able to see if reviews fall in mutiple categories)
+db.airlines_reviews.aggregate([
+  {
+    $project: {
+      Reviews: 1,
+      Issues: {
+        $concat: [
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /compensation|compensate|refund/i } }, "Compensation Related, ", ""] },
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /safe|safety|emergency/i } }, "Safety Related, ", ""] },
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /turbulence/i } }, "Turbulence Related, ", ""] },
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /seat|toilet|comfort/i } }, "Facility Related, ", ""] },
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /service|serve|staff|crew/i } }, "Service Related, ", ""] },
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /delay|late|wait/i } }, "Delay Related, ", ""] },
+          { $cond: [{ $regexMatch: { input: "$Reviews", regex: /baggage|luggage/i } }, "Baggage Related, ", ""] }
+        ]
+      }
+    }
+  },
+  { $match: { Issues: { $regex: /Compensation Related|Safety Related|Turbulence Related/ } } },
+  { $sort: { Issues: 1 } }
+]);
+
+/* I requested a refund 6 months ago, but I have not received the money back, even though repeatedly mailing and calling them once every month, 
+and they keep reassuring me that the payment is on the way. I hope in the end I will get my money back. */
+
+//// notice this review pulled out is from Qatar not SIA, but its still a gd learning point	
+db.airlines_reviews.find({
+  Reviews: { $regex: /I requested a refund 6 months ago/i }
+});
+
+//// the 2 selected categories are the closest to compensation/turbulence issue
+//// the 5 flags we identified to be most relevant to SIA under such circumstances
+//// filter more by searching for certain keywords in the instruction column
+db.customer_support.find({
+  $and: [
+    {
+      $or: [
+        { category: "REFUND" },
+        { intent: "FEEDBACK" }
+      ]
+    },
+    {
+      flags: { $regex: /^(L|B|I|Q|Z)*$/ }
+    },
+    {
+      instruction: { $regex: /refund|compensate|compensation|turbulence/i }
+    }
+  ]
+}).sort({ flags: 1 });
+
+/* Definitely! I completely understand your need to know the specific situations in which you can request refunds. Here are some common 
+scenarios where you may be eligible for a refund:
+
+1. **Product/Service Defect:** If the product or service you receive is defective, malfunctioning, or doesn't meet the specifications mentioned, 
+you can usually request a refund.
+
+2. **Cancellation within Grace Period:** Many companies offer a grace period after purchase, during which you can change your mind and cancel 
+your order for a full refund.
+
+3. **Failure to Deliver or Provide Service:** If a vendor or service provider fails to deliver the product or provide the service as promised, 
+you may be entitled to a refund.
+
+4. **Overcharged or Double Billed:** If you notice discrepancies in your billing, such as being overcharged or double billed for the same item 
+or service, it is reasonable to request a refund for the excess amount.
+
+5. **Unauthorized Transactions:** If you identify any unauthorized charges on your account, it is important to report them immediately to your 
+financial institution and request a refund.
+
+6. **Event Cancellation:** If you purchased tickets for an event that gets canceled entirely or rescheduled to a date that is inconvenient for 
+you, you may be eligible for a refund.
+
+Please note that refund policies can vary between companies, so it's always a good idea to review the specific refund policy of the vendor or 
+service provider you are dealing with. If you have a specific issue or concern regarding a recent purchase, please provide me with the necessary 
+details, such as the order number or transaction ID, so that I can assist you further.
+
+I hope this clarifies the situations in which you can request refunds. If you have any additional questions, feel free to ask! */
